@@ -6,5 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "fastmcp>=4.0.3",
-    "mcp>=2.2.0",
+    "mcp[cli]>=2.2.0",
+    "pydantic>=2.13.5",
+    "selenium>=4.49.0",
 ]
