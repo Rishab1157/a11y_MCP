@@ -1,5 +1,5 @@
 from selenium.webdriver.chrome.options import Options as ChromeOptions
-
+from selenium.webdriver import Chrome
 from Config.DriverConfig import CromeConfig
 from Config.DriverConfigBuilder import DriverOptionsBuilder
 
@@ -12,7 +12,7 @@ BASELINE = [
 
 
 class CromeOptionsBuilder(DriverOptionsBuilder):
-    browser_name = "Chrome",
+    browser_name = "Chrome"
     supported = {
         "headless", "viewport_width", "viewport_height",
         "user_agent", "zoom_percent", "extra_args",
@@ -28,12 +28,17 @@ class CromeOptionsBuilder(DriverOptionsBuilder):
     def _apply(self, cfg: CromeConfig, opts: ChromeOptions) -> None:
         if cfg.headless:
             opts.add_argument("--headless=new")
-        if cfg.viewport_width and cfg.viewport_height:
-            opts.add_argument(f"--window-size={cfg.viewport_width},{cfg.viewport_height}")
+        if cfg.viewport_width or cfg.viewport_height:
+            w = cfg.viewport_width or 1920
+            h = cfg.viewport_height or 1080
+            opts.add_argument(f"--window-size={w},{h}")
         if cfg.user_agent:
             opts.add_argument(f"--user-agent={cfg.user_agent}")
         if cfg.zoom_percent:
             opts.add_argument(f"--force-device-scale-factor={cfg.zoom_percent / 100}")
         for arg in cfg.extra_args or []:
             opts.add_argument(arg)
+    
+    def create_driver(self, opts: ChromeOptions) -> Chrome:
+        return Chrome(options=opts)
     
