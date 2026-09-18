@@ -7,9 +7,9 @@ class Session:
     """One live browser, held in server memory between MCP tool calls."""
     
     driver: WebDriver = field(repr = False)
+    browser: str = "chrome"
     last_used: float = field(default_factory = time.time)
     created_at: float = field(default_factory = time.time)
-    current_url: str | None = None
     reached_target: bool = False
     
     def touch(self) -> None:

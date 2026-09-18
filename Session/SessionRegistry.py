@@ -14,9 +14,9 @@ class SessionRegistry:
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
         
-    def add(self, driver: WebDriver) -> Session:
+    def add(self, driver: WebDriver, browser: str = "chrome") -> Session:
         session_id = uuid.uuid4().hex[:12]
-        self._sessions[session_id] = Session(driver=driver)
+        self._sessions[session_id] = Session(driver=driver, browser=browser)
         return session_id
     
     def get(self, session_id: str) -> Session:

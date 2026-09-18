@@ -8,5 +8,6 @@ dependencies = [
     "fastmcp>=4.0.3",
     "mcp[cli]>=2.2.0",
     "pydantic>=2.13.5",
+    "requests>=2.34.2",
     "selenium>=4.49.0",
 ]

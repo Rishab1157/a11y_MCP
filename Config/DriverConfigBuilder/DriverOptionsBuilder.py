@@ -24,7 +24,7 @@ class DriverOptionsBuilder(ABC):
         """Launch the browser with these options."""
     
     def build(self, cfg: BrowserConfig):
-        requested = set(cfg.model_dump(exclude_none=True))
+        requested = set(cfg.model_dump(exclude_none=True)) - {"browser"}
         unsupported = requested - self.supported
 
         if unsupported:

@@ -2,8 +2,8 @@ from Config.DriverConfigBuilder import CromeOptionsBuilder, DriverOptionsBuilder
 
 
 _BUILDERS: dict[str, DriverOptionsBuilder] = {
-    "chrome", CromeOptionsBuilder(),
-    "firefox", FirefoxOptionsBuilder()
+    "chrome": CromeOptionsBuilder(),
+    "firefox": FirefoxOptionsBuilder()
 }
 
 
