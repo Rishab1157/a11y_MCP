@@ -71,3 +71,16 @@ KEEP_PROPERTIES = {
     "focusable", "disabled", "required", "checked", "expanded",
     "selected", "invalid", "readonly", "level", "hidden",
 }
+
+
+# Chrome ignores nodes for different reasons and they do not mean the same
+# thing. An "uninteresting" wrapper is a plain div/span whose text is still
+# read by assistive tech; an aria-hidden or unrendered node's text is not.
+# The walk-up is bounded by the reason, never by the ignored flag alone.
+HIDDEN_IGNORE_REASONS = {
+    "ariaHiddenElement",
+    "ariaHiddenSubtree",
+    "notRendered",
+    "inertElement",
+    "inertSubtree",
+}

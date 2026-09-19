@@ -10,6 +10,7 @@ from Scan.Roles import (
     INTERACTIVE_ROLES,
     KEEP_PROPERTIES,
     NAME_REQUIRED_ROLES,
+    HIDDEN_IGNORE_REASONS,
 )
 
 def _value(field) -> str:
@@ -17,6 +18,13 @@ def _value(field) -> str:
     if isinstance(field, dict):
         return field.get("value", "")
     return field or ""
+
+def _hidden_ignore(node) -> bool:
+    """True when a node is ignored because it is hidden, not merely uninteresting."""
+    if not node.get("ignored"):
+        return False
+    reasons = {r.get("name") for r in (node.get("ignoredReasons") or [])}
+    return bool(reasons & HIDDEN_IGNORE_REASONS)
 
 class ChromiumAxTreeReader(AxTreeReader):
     """Reads Chrome's own accessibility tree over the DevTools Protocol.
@@ -41,39 +49,49 @@ class ChromiumAxTreeReader(AxTreeReader):
         by_id = {n.get("nodeId"): n for n in all_nodes}
         
         # ── PASS 2 ────────────────────────────────────────────────────────
-        # Fold StaticText children into their parent's "text".
-        # Must run BEFORE any filtering: filter first and the parent is gone
-        # before its text is ever read.
-        text_by_parent: dict[str, str] = {}
+        # Fold each StaticText onto the nearest ancestor that pass 3 will keep.
+        # Chrome wraps text in nodes it marks ignored/"uninteresting", so the
+        # text is usually a grandchild rather than a direct child — climbing
+        # from the text is the only way to find its real owner.
+        text_parts: dict[str, list[str]] = {}
         dropped_text = 0
         
         for node in all_nodes:
             
-            if not (child_ids := node.get("childIds") or []):
+            if _value(node.get("role")) not in FOLDED_ROLES:
                 continue
             
-            parent_ignored = node.get("ignored", False)
-            parts = []
+            if node.get("ignored"):
+                dropped_text += 1                  # the text itself is hidden
+                continue
             
-            for cid in child_ids:            # childIds order == reading order
-                child = by_id.get(cid)
-                if child is None:
-                    continue
-                if _value(child.get("role")) not in FOLDED_ROLES:
-                    continue
-                if child.get("ignored"):
-                    dropped_text += 1        # hidden from AT, not reachable text
-                    continue
-                value = _value(child.get("name")).strip()
-                if not value:
-                    continue
-                if parent_ignored:
-                    dropped_text += 1        # owner not exposed; do not hoist
-                    continue
-                parts.append(value)
+            value = _value(node.get("name")).strip()
+            if not value:
+                continue
+            
+            # Climb to the first ancestor that survives pass 3.
+            owner = by_id.get(node.get("parentId"))
+            blocked = False
+            while owner is not None and owner.get("ignored"):
+                if _hidden_ignore(owner):
+                    blocked = True                 # crossed something hidden
+                    break
+                owner = by_id.get(owner.get("parentId"))
                 
-            if parts:
-                text_by_parent[node.get("nodeId")] = " ".join(parts)
+            if blocked or owner is None:
+                dropped_text += 1
+                continue
+            
+            # The accessible name is computed from contents, so a control's
+            # name usually already contains this string. Keep only what the
+            # name does not already carry.
+            owner_name = _value(owner.get("name")).strip()
+            if value in owner_name:
+                continue
+            
+            text_parts.setdefault(owner.get("nodeId"), []).append(value)
+        
+        text_by_parent = {k: " ".join(v) for k, v in text_parts.items()}
 
         # ── PASS 3 ────────────────────────────────────────────────────────
         # Emit normalised nodes.

@@ -258,6 +258,8 @@ def get_accessibility_tree(session_id: str, include_all_nodes: bool = False, pag
         tree.pop("nodes", None)
         
     return {"ok": True, "page_ready": ready, **tree}
+
+
 def main():
     mcp.run(transport = "streamable-http", host = "0.0.0.0", port = 8081)
 
