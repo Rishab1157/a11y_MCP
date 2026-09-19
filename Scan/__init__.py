@@ -1,7 +1,6 @@
 from .AxTreeReader import (
     AxTreeReader,
     AxTreeUnsupportedError,
-    FirefoxAxTreeReader,
     get_reader,
     register,
 )
