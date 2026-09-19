@@ -69,8 +69,22 @@ out.push({
     inaccessible: false,
 });
 
+// querySelectorAll does not pierce shadow roots, so every element inside a
+// web component would otherwise be invisible to the scan — silently, with
+// no error. Chrome's getFullAXTree traverses them automatically.
+function* walkAll(root) {
+    for (const el of root.querySelectorAll('*')) {
+        yield el;
+        if (el.shadowRoot) yield* walkAll(el.shadowRoot);
+    }
+}
+
+const seen = new Set();
 let index = 0;
-for (const el of document.querySelectorAll('*')) {
+for (const el of walkAll(document)) {
+    // Slotted content lives in the light DOM but renders inside the shadow
+    if (seen.has(el)) continue;
+    seen.add(el);
     if (skip.has(el.tagName.toLowerCase())) continue;
 
     let role = null, name = '', description = '', inaccessible = false;
@@ -81,6 +95,14 @@ for (const el of document.querySelectorAll('*')) {
         inaccessible = api.isInaccessible(el);
     } catch (e) {
         continue;                       // element the library cannot handle
+    }
+    
+    // getRole() returns null for embedded content that browsers expose as
+    // images. Without this every unnamed SVG icon is invisible to the scan
+    // while Chrome correctly flags it.
+    if (role === null) {
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'svg' || tag === 'canvas') role = 'img';
     }
 
     out.push({
