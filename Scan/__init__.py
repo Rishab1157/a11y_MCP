@@ -7,8 +7,7 @@ from .AxTreeReader import (
 )
 from .ChromiumAxTreeReader import ChromiumAxTreeReader
 from .PageReady import wait_for_page_ready
-
-register(FirefoxAxTreeReader())
+from .FirefoxAxTreeReader import FirefoxAxTreeReader
 
 __all__ = [
     "AxTreeReader",

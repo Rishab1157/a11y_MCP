@@ -32,26 +32,6 @@ class AxTreeReader(ABC):
     @abstractmethod
     def read(self, driver: WebDriver) -> dict:
         """Return the normalised accessibility tree for the current page."""
-    
-    
-
-class FirefoxAxTreeReader(AxTreeReader):
-    """Placeholder. Firefox exposes no CDP equivalent for the AX tree.
-
-    Planned route: vendor an IIFE bundle of dom-accessibility-api, inject it,
-    and compute role / name / description per element, filtering with the
-    library's isInaccessible() to mirror how CDP marks nodes ignored.
-    """
-
-    browser = "firefox"
-    ax_source = "computed"
-    ax_engine = "dom-accessibility-api"
-
-    def read(self, driver: WebDriver) -> dict:
-        raise AxTreeUnsupportedError(
-            "Accessibility tree reading is not implemented for Firefox yet. "
-            "Create a Chrome session for this scan."
-        )
 
 _READERS: dict[str, AxTreeReader] = {}
 
