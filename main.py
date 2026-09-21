@@ -1,3 +1,6 @@
+import logging
+import sys
+
 from fastmcp import FastMCP
 from urllib.parse import urlparse
 from Auth import AnyAuthConfig, get_provider
@@ -6,14 +9,24 @@ from Config.DriverConfig import AnyBrowserConfig, CromeConfig
 from Config.DriverConfigBuilder import UnsupportedOptionError, get_builder
 from Scan import AxTreeUnsupportedError, get_reader, wait_for_page_ready
 
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stderr,
+    format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
+)
+
 mcp = FastMCP("a11y MCP server")
 
 @mcp.tool()
 def create_driver(config: AnyBrowserConfig | None = None) -> dict:
     """Create a browser session for accessibility testing.
 
-    Set "browser" to "chrome" or "firefox". Options differ per browser —
-    Chrome supports zoom_percent, Firefox supports profile_path.
+    Set "browser" to "chrome", "edge" or "firefox". Options differ per browser —
+    Chrome and Edge support zoom_percent, Firefox supports profile_path.
+
+    Chrome and Edge are both Chromium and produce identical accessibility
+    trees. If "chrome" fails to start, retry with "edge" before reporting
+    failure — some machines refuse to run the unsigned Chrome driver.
     Anything omitted uses the browser's default.
 
     Returns a session_id required by every other a11y tool.

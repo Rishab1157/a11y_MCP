@@ -154,3 +154,16 @@ class ChromiumAxTreeReader(AxTreeReader):
         return result
         
 register(ChromiumAxTreeReader())
+
+
+class EdgeAxTreeReader(ChromiumAxTreeReader):
+    """Edge is Chromium, so its CDP tree is byte-identical in shape to Chrome's.
+
+    Only the registry key differs — get_reader() looks readers up by the
+    session's browser name.
+    """
+
+    browser = "edge"
+
+
+register(EdgeAxTreeReader())

@@ -1,6 +1,10 @@
+import logging
 from abc import ABC, abstractmethod
 from Config.DriverConfig import BrowserConfig
 from selenium.webdriver.remote.webdriver import WebDriver
+
+logger = logging.getLogger(__name__)
+
 
 class UnsupportedOptionError(ValueError):
     """Raised when a config asks for something this browser cannot do."""
@@ -23,6 +27,22 @@ class DriverOptionsBuilder(ABC):
     def create_driver(self, options) -> WebDriver:
         """Launch the browser with these options."""
     
+    @staticmethod
+    def _log_launch(driver: WebDriver) -> None:
+        """One line per launch, same shape for every browser.
+
+        Goes to the logging module rather than print() because stdout is
+        block-buffered whenever it is not a terminal, which is exactly how
+        this server runs.
+        """
+        caps = driver.capabilities or {}
+        logger.info(
+            "launched %s (session %s)",
+            caps.get("browserName", "?"),
+            driver.session_id,
+        )
+        logger.debug("capabilities: %s", caps)
+
     def build(self, cfg: BrowserConfig):
         requested = set(cfg.model_dump(exclude_none=True)) - {"browser"}
         unsupported = requested - self.supported

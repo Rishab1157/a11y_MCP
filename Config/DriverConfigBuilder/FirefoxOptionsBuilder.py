@@ -34,4 +34,6 @@ class FirefoxOptionsBuilder(DriverOptionsBuilder):
             opts.add_argument(arg)
 
     def create_driver(self, opts: FirefoxOptions) -> Firefox:
-        return Firefox(options=opts)
+        firefox_driver = Firefox(options=opts)
+        self._log_launch(firefox_driver)
+        return firefox_driver

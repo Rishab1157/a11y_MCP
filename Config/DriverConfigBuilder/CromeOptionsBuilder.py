@@ -1,6 +1,6 @@
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver import Chrome
-from Config.DriverConfig import CromeConfig
+from Config.DriverConfig import CromeConfig, EdgeConfig
 from Config.DriverConfigBuilder import DriverOptionsBuilder
 
 BASELINE = [
@@ -25,7 +25,7 @@ class CromeOptionsBuilder(DriverOptionsBuilder):
         opts.add_experimental_option("excludeSwitches", ["enable-logging"])
         return opts
     
-    def _apply(self, cfg: CromeConfig, opts: ChromeOptions) -> None:
+    def _apply(self, cfg: CromeConfig | EdgeConfig, opts: ChromeOptions) -> None:
         if cfg.headless:
             opts.add_argument("--headless=new")
         if cfg.viewport_width or cfg.viewport_height:
@@ -40,5 +40,7 @@ class CromeOptionsBuilder(DriverOptionsBuilder):
             opts.add_argument(arg)
     
     def create_driver(self, opts: ChromeOptions) -> Chrome:
-        return Chrome(options=opts)
+        chrome_driver = Chrome(options=opts)
+        self._log_launch(chrome_driver)
+        return chrome_driver
     
