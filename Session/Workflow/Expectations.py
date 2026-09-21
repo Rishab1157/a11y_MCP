@@ -3,125 +3,148 @@
 Polls until satisfied or timeout — never sleeps a fixed amount. A fast page
 costs milliseconds; only a genuine failure costs the full timeout.
 
-Strength order, strongest first:
-    state  >  appears / disappears  >  text_contains  >  text_changes_in
+Every Expect resolves its own target against the CURRENT DOM, after the
+action. Nothing is inherited from the Step: after a navigation the element
+that was acted on may not exist any more.
 
-text_changes_in proves something changed, not that the intended state was
-reached. It is the anchor of last resort, for applications that expose no
-explicit state at all.
+Strength order, strongest first:
+    state  >  appears / disappears  >  text_contains  >  text_changed
 """
 
 import time
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 
-from Session.Workflow.Models import Expect, Target
+from Session.Workflow.Models import Expect, Step
 from Session.Workflow.Resolver import (
     AmbiguousTargetError,
     TargetNotFoundError,
-    find_all,
+    describe,
+    exists,
     resolve,
 )
+from Session.Workflow.Models import Target
 
 POLL_SECONDS = 0.4
 
-# Live state read off the element. `value` is deliberately read from the DOM
-# rather than the AX tree — it is a live property, not tree metadata, and is
-# not in KEEP_PROPERTIES.
+# `value` is read live from the DOM rather than the AX tree — it is a live
+# property, not tree metadata, and is deliberately absent from KEEP_PROPERTIES.
 _READ_STATE = """
 const el = arguments[0];
 const aria = n => el.getAttribute('aria-' + n);
-const out = {};
-out.checked  = aria('checked') !== null ? aria('checked') === 'true'
-             : (el.checked !== undefined ? !!el.checked : null);
-out.expanded = aria('expanded') !== null ? aria('expanded') === 'true' : null;
-out.selected = aria('selected') !== null ? aria('selected') === 'true' : null;
-out.disabled = el.disabled === true || aria('disabled') === 'true';
-out.required = el.required === true || aria('required') === 'true';
-out.readonly = el.readOnly === true || aria('readonly') === 'true';
-out.invalid  = aria('invalid');
-out.value    = el.value !== undefined ? el.value
-             : (el.isContentEditable ? el.textContent : null);
-return out;
+return {
+    checked:  aria('checked')  !== null ? aria('checked')  === 'true'
+            : (el.checked !== undefined && el.checked !== null ? !!el.checked : null),
+    expanded: aria('expanded') !== null ? aria('expanded') === 'true' : null,
+    selected: aria('selected') !== null ? aria('selected') === 'true' : null,
+    disabled: el.disabled === true || aria('disabled') === 'true',
+    required: el.required === true || aria('required') === 'true',
+    readonly: el.readOnly === true || aria('readonly') === 'true',
+    invalid:  aria('invalid'),
+    value:    el.value !== undefined && el.value !== null ? el.value
+            : (el.isContentEditable ? el.textContent : null),
+};
 """
 
 
 class ExpectationFailed(AssertionError):
-    """The expectation was not satisfied within its timeout."""
+    """An expectation was not satisfied within its timeout."""
 
 
-def snapshot_before(driver: WebDriver, expect: Expect | None) -> str | None:
-    """Capture what text_changes_in needs to compare against, before the action."""
-    if expect is None or expect.text_changes_in is None:
-        return None
-    try:
-        return resolve(driver, expect.text_changes_in).text
-    except (TargetNotFoundError, AmbiguousTargetError):
-        return None            # absent now, appearing later still counts as a change
+def snapshot_before(driver: WebDriver, step: Step) -> dict[int, str | None]:
+    """Capture baselines for every text_changed expectation, keyed by index.
+
+    Must run BEFORE the action. An element that does not exist yet has a
+    baseline of None — appearing later then counts as a change.
+    """
+    baselines: dict[int, str | None] = {}
+    for i, expect in enumerate(step.expects):
+        if not expect.text_changed or expect.target is None:
+            continue
+        try:
+            baselines[i] = resolve(driver, expect.target).text
+        except (TargetNotFoundError, AmbiguousTargetError):
+            baselines[i] = None
+    return baselines
 
 
-def verify(driver: WebDriver, expect: Expect | None,
-           target: Target | None = None, before: str | None = None) -> dict:
-    """Poll until the expectation holds. Raises ExpectationFailed on timeout."""
-    if expect is None:
-        return {"verified": False, "note": "no expectation given"}
+def verify_all(driver: WebDriver, step: Step, baselines: dict[int, str | None]) -> list[dict]:
+    """Check every expectation in order. Raises on the first that fails.
 
+    Sequential rather than concurrent: predictable, and the trail can say
+    which assertion failed. Timeouts therefore add up.
+    """
+    results = []
+    for i, expect in enumerate(step.expects):
+        results.append(_verify_one(driver, expect, i, len(step.expects), baselines.get(i)))
+    return results
+
+
+def _verify_one(driver: WebDriver, expect: Expect, index: int, total: int, baseline: str | None) -> dict:
     deadline = time.time() + expect.timeout
+    started = time.time()
     last = None
 
     while time.time() < deadline:
-        ok, detail = _check(driver, expect, target, before)
+        ok, detail = _check(driver, expect, baseline)
         last = detail
         if ok:
-            return {"verified": True, "via": detail,
-                    "waited": round(expect.timeout - (deadline - time.time()), 2)}
+            return {
+                "expectation": f"{index + 1} of {total}",
+                "label": expect.label,
+                "verified": True,
+                "via": detail,
+                "seconds": round(time.time() - started, 2),
+            }
         time.sleep(POLL_SECONDS)
 
     raise ExpectationFailed(
-        f"Expectation not met within {expect.timeout}s. Last observed: {last}"
+        f"Expectation {index + 1} of {total}"
+        + (f" ({expect.label})" if expect.label else "")
+        + f" not met within {expect.timeout}s. Last observed: {last}"
     )
 
 
-def _check(driver, expect: Expect, target, before):
+def _check(driver: WebDriver, expect: Expect, baseline: str | None):
     # 1. explicit accessibility state — strongest
     if expect.state is not None:
-        if target is None:
-            return False, "state expected but the step had no target"
         try:
-            element = resolve(driver, target)
+            element = resolve(driver, expect.target)
         except (TargetNotFoundError, AmbiguousTargetError) as e:
             return False, f"target not resolvable: {e}"
         actual = driver.execute_script(_READ_STATE, element)
-        for key, want in expect.state.model_dump(exclude_none=True):
-            if key not in actual:
-                return False, f"unknown state key {key!r}; readable: {sorted(actual)}"
-            if actual[key] != want:
-                return False, f"{key}={actual[key]!r}, expected {want!r}"
-        return True, f"state {expect.state}"
+        wanted = expect.state.model_dump(exclude_none=True)
+        for key, want in wanted.items():
+            if actual.get(key) != want:
+                return False, f"{key}={actual.get(key)!r}, expected {want!r}"
+        return True, f"state {wanted} on {describe(expect.target)}"
 
     # 2. an element appeared or disappeared
     if expect.appears is not None:
-        found, _ = find_all(driver, Target(name=expect.appears))
-        return (bool(found), f"{expect.appears!r} {'appeared' if found else 'not present yet'}")
+        found = exists(driver, Target(name=expect.appears))
+        return found, (f"{expect.appears!r} "
+                       f"{'appeared' if found else 'not present yet'}")
 
     if expect.disappears is not None:
-        found, _ = find_all(driver, Target(name=expect.disappears))
-        return (not found, f"{expect.disappears!r} {'gone' if not found else 'still present'}")
+        found = exists(driver, Target(name=expect.disappears))
+        return (not found), (f"{expect.disappears!r} "
+                             f"{'gone' if not found else 'still present'}")
 
-    # 3. text present somewhere on the page
+    # 3. text anywhere on the page
     if expect.text_contains is not None:
         body = driver.find_element(By.TAG_NAME, "body").text
         hit = expect.text_contains in body
         return hit, f"{expect.text_contains!r} {'found' if hit else 'not found'}"
 
     # 4. weakest — something changed
-    if expect.text_changes_in is not None:
+    if expect.text_changed:
         try:
-            now = resolve(driver, expect.text_changes_in).text
-        except (TargetNotFoundError, AmbiguousTargetError) as e:
-            return False, f"comparison target not resolvable: {e}"
-        changed = now != before
-        return changed, ("text changed" if changed
-                         else f"text unchanged ({(now or '')[:40]!r})")
+            now = resolve(driver, expect.target).text
+        except (TargetNotFoundError, AmbiguousTargetError):
+            # Present before and gone now is also a change.
+            return (baseline is not None), "target no longer resolvable"
+        changed = now != baseline
+        return changed, ("text changed" if changed else f"text unchanged ({(now or '')[:40]!r})")
 
-    return True, "expectation object was empty"
+    return True, "expectation asserted nothing"

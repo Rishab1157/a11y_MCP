@@ -5,46 +5,55 @@ React re-renders and a cached WebElement goes stale, which is the most common
 source of flakiness in workflow engines.
 """
 
+from selenium.webdriver import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 
 from Session.Workflow.Models import Step, Target
-from Session.Workflow.Resolver import resolve
+from Session.Workflow.Resolver import describe, resolve
 
 KEYS = {
     "ENTER": Keys.ENTER, "TAB": Keys.TAB, "ESCAPE": Keys.ESCAPE,
     "SPACE": Keys.SPACE, "BACKSPACE": Keys.BACKSPACE, "DELETE": Keys.DELETE,
     "ARROW_UP": Keys.ARROW_UP, "ARROW_DOWN": Keys.ARROW_DOWN,
     "ARROW_LEFT": Keys.ARROW_LEFT, "ARROW_RIGHT": Keys.ARROW_RIGHT,
-    "HOME": Keys.HOME, "END": Keys.END, "PAGE_UP": Keys.PAGE_UP,
-    "PAGE_DOWN": Keys.PAGE_DOWN,
+    "HOME": Keys.HOME, "END": Keys.END,
+    "PAGE_UP": Keys.PAGE_UP, "PAGE_DOWN": Keys.PAGE_DOWN,
 }
 
-# Reads the live checked state. aria-checked wins over the DOM property because
-# a custom control may use the attribute without being a real <input>.
+# <div class="custom-checkbox">
+#     <input type="checkbox" checked>
+# </div> inner to resolve the inner stuff if parent dosen't contain
 _IS_CHECKED = """
 const el = arguments[0];
 const aria = el.getAttribute('aria-checked');
 if (aria !== null) return aria === 'true';
-if (el.checked !== undefined) return !!el.checked;
+if (el.checked !== undefined && el.checked !== null) return !!el.checked;
 const inner = el.querySelector('input[type=checkbox], input[type=radio], [aria-checked]');
 if (inner) {
     const a = inner.getAttribute('aria-checked');
     if (a !== null) return a === 'true';
-    return !!inner.checked;
+    if (inner.checked !== undefined) return !!inner.checked;
 }
-return null;                       // state not exposed — cannot reconcile
+return null;
 """
 
-_SET_VALUE = """
+# Rich-text editors ignore send_keys and need the input event dispatched.
+_SET_CONTENTEDITABLE = """
 const el = arguments[0], value = arguments[1];
-if (el.isContentEditable) {
-    el.focus();
-    el.textContent = value;
-    el.dispatchEvent(new InputEvent('input', {bubbles: true}));
-    return true;
-}
-return false;                      // a normal field — let Selenium type it
+if (!el.isContentEditable) return false;
+el.focus();
+el.textContent = value;
+el.dispatchEvent(new InputEvent('input', {bubbles: true}));
+el.dispatchEvent(new Event('change', {bubbles: true}));
+return true;
+"""
+
+_READ_VALUE = """
+const el = arguments[0];
+if (el.value !== undefined && el.value !== null) return el.value;
+if (el.isContentEditable) return el.textContent;
+return null;
 """
 
 
@@ -68,23 +77,22 @@ def perform(driver: WebDriver, step: Step) -> dict:
     element = resolve(driver, step.target)          # always fresh
     _scroll_into_view(driver, element)
 
-    if action == "click":
-        element.click()
-        return {"action": "click", "clicked": True}
-
     if action == "scroll_to":
         return {"action": "scroll_to", "scrolled": True}
 
+    if action == "click":
+        element.click()
+        return {"action": "click", "clicked": describe(step.target)}
+
     if action == "hover":
-        from selenium.webdriver import ActionChains
         ActionChains(driver).move_to_element(element).perform()
-        return {"action": "hover", "hovered": True}
+        return {"action": "hover", "hovered": describe(step.target)}
 
     if action == "press":
         key = KEYS.get((step.value or "").upper())
         if key is None:
             raise ActionError(
-                f"Unknown key {step.value!r}. Supported: {sorted(KEYS)}"
+                f"Unknown key {step.value!r}. Supported: {', '.join(sorted(KEYS))}"
             )
         element.send_keys(key)
         return {"action": "press", "key": step.value}
@@ -92,10 +100,11 @@ def perform(driver: WebDriver, step: Step) -> dict:
     if action == "fill":
         if step.value is None:
             raise ActionError("fill requires `value`")
-        current = element.get_attribute("value") or element.text or ""
+        current = driver.execute_script(_READ_VALUE, element) or ""
         if current == step.value:
-            return {"action": "fill", "skipped": "already set", "value": step.value}
-        if not driver.execute_script(_SET_VALUE, element, step.value):
+            return {"action": "fill", "skipped": "already set",
+                    "value": step.value[:60]}
+        if not driver.execute_script(_SET_CONTENTEDITABLE, element, step.value):
             element.clear()
             element.send_keys(step.value)
         return {"action": "fill", "was": current[:60], "now": step.value[:60]}
@@ -106,12 +115,14 @@ def perform(driver: WebDriver, step: Step) -> dict:
 
         if current is None:
             raise ActionError(
-                f"{_name(step.target)} exposes no checked state, so it cannot be "
-                f"reconciled. Use `click` if you know the current state, or fix "
-                f"the control to expose aria-checked (WCAG 4.1.2)."
+                f"{describe(step.target)} exposes no checked state, so it cannot "
+                f"be reconciled — clicking it blind could toggle it the wrong way. "
+                f"Use `click` if you already know the state, or fix the control to "
+                f"expose aria-checked (WCAG 4.1.2)."
             )
         if current == want:
-            return {"action": action, "skipped": "already correct", "checked": current}
+            return {"action": action, "skipped": "already correct",
+                    "checked": current}
 
         element.click()
         after = driver.execute_script(_IS_CHECKED, resolve(driver, step.target))
@@ -121,10 +132,9 @@ def perform(driver: WebDriver, step: Step) -> dict:
 
 
 def _scroll_into_view(driver: WebDriver, element) -> None:
+    """Selenium's click auto-scrolls; hover and press do not, and lazily
+    rendered content needs it regardless."""
     driver.execute_script(
-        "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", element
+        "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+        element,
     )
-
-
-def _name(target: Target) -> str:
-    return repr(target.name) if target.name else "target"

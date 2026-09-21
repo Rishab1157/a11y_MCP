@@ -7,6 +7,7 @@ implementation for both browsers.
 Filter order:  within → name/role → css → nth → ambiguity check
 """
 
+from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 
@@ -91,37 +92,6 @@ return {
 """
 
 
-def resolve(driver: WebDriver, target: Target) -> WebElement:
-    """Return the one element this Target names, or raise."""
-    matches, described = find_all(driver, target)
-
-    if not matches:
-        raise TargetNotFoundError(
-            f"No accessible element matched {_describe(target)}. "
-            f"If the control exists visually, it has no accessible name — "
-            f"a screen reader user cannot identify it either (WCAG 4.1.2)."
-        )
-
-    # nth is the final narrowing operation, over the fully filtered list.
-    if target.nth is not None:
-        if target.nth >= len(matches):
-            raise TargetNotFoundError(
-                f"{_describe(target)} matched {len(matches)} element(s) after "
-                f"filtering, but nth={target.nth} is out of range."
-            )
-        return matches[target.nth]
-
-    if len(matches) > 1:
-        raise AmbiguousTargetError(
-            f"{_describe(target)} matched {len(matches)} elements: {described}. "
-            f"Add `role`, scope it with `within`, or add `css` as an extra "
-            f"constraint. Avoid `nth` — DOM order changes with sorting and "
-            f"pagination."
-        )
-
-    return matches[0]
-
-
 def find_all(driver: WebDriver, target: Target):
     """Return (elements, descriptions) after within → name/role → css filtering.
 
@@ -140,12 +110,52 @@ def find_all(driver: WebDriver, target: Target):
         scope,
     )
     if result.get("error"):
-        raise TargetNotFoundError(f"{_describe(target)}: {result['error']}")
+        raise TargetNotFoundError(f"{describe(target)}: {result['error']}")
 
     return result["elements"], result["described"]
 
 
-def _describe(target: Target) -> str:
+def resolve(driver: WebDriver, target: Target) -> WebElement:
+    """Return the one element this Target names, or raise."""
+    matches, described = find_all(driver, target)
+
+    if not matches:
+        raise TargetNotFoundError(
+            f"No accessible element matched {describe(target)}. If the control "
+            f"exists visually, it has no accessible name — a screen reader user "
+            f"cannot identify it either (WCAG 4.1.2)."
+        )
+
+    # nth is the final narrowing operation, over the fully filtered list.
+    if target.nth is not None:
+        if target.nth >= len(matches):
+            raise TargetNotFoundError(
+                f"{describe(target)} matched {len(matches)} element(s) after "
+                f"filtering, but nth={target.nth} is out of range."
+            )
+        return matches[target.nth]
+
+    if len(matches) > 1:
+        raise AmbiguousTargetError(
+            f"{describe(target)} matched {len(matches)} elements: {described}. "
+            f"Add `role`, scope it with `within`, or add `css` as an extra "
+            f"constraint. Avoid `nth` — DOM order changes with sorting and "
+            f"pagination."
+        )
+
+    return matches[0]
+
+
+def exists(driver: WebDriver, target: Target) -> bool:
+    """True when at least one element matches. Used by page-level expectations."""
+    try:
+        matches, _ = find_all(driver, target)
+        return bool(matches)
+    except TargetNotFoundError:
+        return False
+
+
+def describe(target: Target) -> str:
     bits = []
     if target.name:
         bits.append(f"name={target.name!r}")
@@ -155,4 +165,6 @@ def _describe(target: Target) -> str:
         bits.append(f"css={target.css!r}")
     if target.within and target.within.name:
         bits.append(f"within={target.within.name!r}")
+    if target.nth is not None:
+        bits.append(f"nth={target.nth}")
     return "Target(" + ", ".join(bits) + ")" if bits else "Target(empty)"
