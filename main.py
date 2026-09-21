@@ -1,7 +1,7 @@
 from fastmcp import FastMCP
 from urllib.parse import urlparse
 from Auth import AnyAuthConfig, get_provider
-from Session import SessionResult, registry, detect_auth_scheme, verify_arrival
+from Session import SessionResult, registry, detect_auth_scheme, verify_arrival, Target, find_all, Step, _run_steps
 from Config.DriverConfig import AnyBrowserConfig, CromeConfig
 from Config.DriverConfigBuilder import UnsupportedOptionError, get_builder
 from Scan import AxTreeUnsupportedError, get_reader, wait_for_page_ready
@@ -259,6 +259,146 @@ def get_accessibility_tree(session_id: str, include_all_nodes: bool = False, pag
         
     return {"ok": True, "page_ready": ready, **tree}
 
+
+@mcp.tool()
+def resolve_target(session_id: str, target: Target) -> dict:
+    """Check whether a Target resolves to exactly one element, without acting.
+
+    Use this to build a workflow: probe each target first, confirm it matches
+    one element, then run the steps. An ambiguous or missing target is far
+    cheaper to find here than halfway through a workflow that has already
+    changed application state.
+
+    A target that cannot be found by accessible name is itself an accessibility
+    finding — a screen reader user could not identify that control either.
+    """
+    
+    try:
+        session = registry.get(session_id)
+    except ValueError as e:
+        return {"ok": False, "code": "unknown_session", "error": str(e)}
+    
+    try:
+        matches, described = find_all(session.driver, target)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    
+    result = {"ok": True, "matched": len(matches), "candidates": described}
+    if not matches:
+        result["hint"] = (
+            "No matching element found. Check the target name, role, or CSS selector."
+        )
+    elif len(matches) > 1:
+        result["hint"] = (
+            "Multiple elements matched. Refine the target or use `nth` if the position is known and stable."
+        )
+    return result
+    
+
+@mcp.tool()
+def run_steps(
+        session_id: str, steps: list[Step], dry_run: bool = False, 
+        allow_destructive: bool = False, page_timeout: int = 15
+    ) -> dict:
+    """Drive the application through a sequence of UI actions.
+
+    Each step acts on one target and then checks its own expectations. Targets
+    are located by accessible name, so workflows survive class-name changes
+    and re-renders.
+
+    Run with dry_run=true first: it resolves every target without acting, so a
+    typo in step 12 fails in seconds instead of half-completing the workflow.
+
+    Steps that look irreversible — Delete, Log out, Pay — are refused unless
+    allow_destructive is set.
+
+    Returns a trail: what each step did, which expectation proved it, and where
+    it stopped. Read the trail on failure; it names the exact assertion that
+    was not met.
+    """
+    
+    try:
+        session = registry.get(session_id)
+    except ValueError as e:
+        return {"ok": False, "code": "unknown_session", "error": str(e)}
+
+    return _run_steps(session.driver, steps, dry_run, allow_destructive, page_timeout)
+
+
+@mcp.tool()
+def reach_state(
+        session_id: str, target_url: str, steps: list[Step] | None = None,
+        success_check: str = "", allow_destructive: bool = False
+    ) -> dict:
+    """Get the application into a specific state, then confirm it.
+
+    Some pages depend on state that only exists in application memory — a
+    selected project, a chosen workspace. Navigating straight to such a URL
+    redirects away, and scanning what you land on audits the wrong page.
+
+    This navigates, and if the target was not reached, runs the supplied steps
+    to establish the prerequisite, then navigates again and re-verifies.
+
+    Sets reached_target on the session, which every scan tool checks. Scans are
+    refused until this succeeds.
+
+    Args:
+        session_id: From create_driver.
+        target_url: The page to end up on.
+        steps: Actions that establish the prerequisite state, e.g. selecting a
+            project. Omit when the page has no prerequisites.
+        success_check: Text that only appears once the real page has loaded.
+            The strongest proof of arrival.
+    """
+    
+    try:
+        session = registry.get(session_id)
+    except ValueError as e:
+        return {"ok": False, "code": "unknown_session", "error": str(e)}
+
+    driver = session.driver
+    trail = {}
+
+    try:
+        driver.get(target_url)
+    except Exception as e:
+        return {"ok": False, "error": f"could not reach {target_url}: {e}"}
+    
+    check = verify_arrival(driver, target_url, success_check)
+    if not check["reached"] and steps:
+        trail["steps"] = _run_steps(driver, steps, allow_destructive=allow_destructive)
+        if not trail["steps"]["ok"]:
+            session.reached_target = False
+            return {
+                "ok": True,
+                "reached_target": False,
+                "reason": "prerequisite step falied",
+                "final_url": driver.current_url , **trail
+            }
+            
+        try:
+            driver.get(target_url)            # retry now that state exists
+        except Exception as e:
+            return {"ok": False, "error": f"could not reach {target_url}: {e}"}
+        check = verify_arrival(driver, target_url, success_check)
+
+    session.reached_target = check["reached"]
+
+    result = {
+        "ok": True,
+        "reached_target": check["reached"],
+        "requested_url": target_url,
+        "final_url": check["final_url"],
+        "title": check["title"], **trail,
+    }
+    if not check["reached"]:
+        result["reasons"] = check["reasons"]
+        result["auth"] = detect_auth_scheme(driver)
+        if not steps:
+            result["hint"] = "The page redirected and no steps were supplied"
+    return result
+        
+        
 
 def main():
     mcp.run(transport = "streamable-http", host = "0.0.0.0", port = 8081)
