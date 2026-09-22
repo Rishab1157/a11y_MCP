@@ -4,7 +4,7 @@ import sys
 from fastmcp import FastMCP
 from urllib.parse import urlparse
 from Auth import AnyAuthConfig, get_provider
-from Session import SessionResult, registry, detect_auth_scheme, verify_arrival, Target, find_all, Step, _run_steps
+from Session import SessionResult, registry, detect_auth_scheme, verify_arrival, Target, find_all, Step, _run_steps, classify_failure
 from Config.DriverConfig import AnyBrowserConfig, CromeConfig
 from Config.DriverConfigBuilder import UnsupportedOptionError, get_builder
 from Scan import AxTreeUnsupportedError, get_reader, wait_for_page_ready
@@ -111,12 +111,22 @@ def navigate(session_id: str, url: str, success_check: str = "") -> dict:
     
     if not check["reached"]:
         result["reasons"] = check["reasons"]
-        result["auth"] = detect_auth_scheme(session.driver)
+        result["failure_kind"] = classify_failure(session.driver, check["final_url"], url)
+        
+        if result["failure_kind"] == "auth":
+            result["auth"] = detect_auth_scheme(session.driver)
+        elif result["failure_kind"] == "prerequisite":
+            result["hint"] = (
+                "The app redirected to another of its own pages, so the session is "
+                "authenticated but this route needs application state that is not set "
+                "- a selected project, workspace or similar. Use reach_state with "
+                "steps that establish it."
+            )
     return result
 
 
 @mcp.tool()
-def authenticate(session_id: str, auth: AnyAuthConfig, target_url: str) -> dict:
+def authenticate(session_id: str, auth: AnyAuthConfig, target_url: str, success_check: str = "") -> dict:
     """Authenticate a browser session so protected pages can be scanned.
 
     Call navigate() first. When it reports reached_target=false it returns an
@@ -146,6 +156,7 @@ def authenticate(session_id: str, auth: AnyAuthConfig, target_url: str) -> dict:
         session_id: From create_driver.
         auth: Auth configuration; its "mode" selects the method.
         target_url: Protected page used to confirm authentication succeeded.
+        success_check: Text that only appears once the real page has loaded.
     """
     
     try:
@@ -177,8 +188,9 @@ def authenticate(session_id: str, auth: AnyAuthConfig, target_url: str) -> dict:
         return {"ok": False, "mode": auth.mode, "error": f"{type(e).__name__}: {e}"}
 
     driver.get(target_url)
-    check = verify_arrival(driver, target_url)
-    session.reached_target = check["reached"]
+    check = verify_arrival(driver, target_url, success_check)
+    session.reached_target = check["reached"]   
+
 
     
     result = {

@@ -75,6 +75,28 @@ def _first_match(driver, selectors):
                 return el
     return None
 
+def classify_failure(driver: WebDriver, current: str, target_url: str) -> str:
+    """Why did we not arrive? Auth and application state need different fixes.
+
+    Returning "auth" for a state problem sends the agent off to re-enter
+    credentials that were never wrong.
+    """
+    # A real login form: visible username AND password
+    if _first_match(driver, PASSWORD_GUESSES) and _first_match(driver, USERNAME_GUESSES):
+        return "auth"
+
+    host = urlparse(current).netloc.lower()
+    if any(s in host for s in SSO_HOSTS):
+        return "auth"
+
+    if any(w in (driver.title or "").lower() for w in LOGIN_WORDS):
+        return "auth"
+
+    if host == urlparse(target_url).netloc.lower():
+        return "prerequisite"
+
+    return "unknown"
+
 def detect_auth_scheme(driver: WebDriver) -> dict:
     """Report which auth modes can work on the current page, best first.
 
@@ -153,7 +175,7 @@ def detect_auth_scheme(driver: WebDriver) -> dict:
     options = sorted(modes.values(), key=lambda o: rank[o["confidence"]])
 
     return {
-        "protected": True,
+        "protected": has_form or has_sso,
         "options": options,
         "has_form": has_form,
         "has_sso": has_sso,
