@@ -5,45 +5,27 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
+from Session.Settle import wait_until_settled
 
 from Auth import LOGIN_WORDS, SSO_HOSTS, SSO_TEXT_HINTS, PASSWORD_GUESSES, USERNAME_GUESSES
 
-def verify_arrival(driver: WebDriver, target_url: str, success_check: str = "", timeout: int = 10) -> dict:
+def verify_arrival(driver: WebDriver, target_url: str, success_check: str = "", timeout: int = 10, settle_timeout: float = 10.0) -> dict:
     """Check whether the browser actually reached the target page.
 
-    Returns reached=False with reasons when it landed on a login wall instead.
-    Never assume a navigation succeeded — that is how a scan ends up
-    auditing a login screen and reporting it as the application.
+    Returns reached=False with reasons when it landed on a login wall or a
+    different page instead. Never assume a navigation succeeded — that is how
+    a scan ends up auditing a login screen and reporting it as the application.
     """
-    
+
+    # 1. Let the SPA router finish. Nothing below is meaningful until it has:
+    # driver.get() returns at document-ready, and the redirect comes after.
+    settle = wait_until_settled(driver, timeout=settle_timeout)
+
     reasons: list[str] = []
-    current = driver.current_url
-    title = driver.title or ""
-    
-    # 1. Redirected somewhere else?
-    if urlparse(current).path.rstrip("/") != urlparse(target_url).path.rstrip("/"):
-        reasons.append(f"redirected to {current}")
-        
-    # 2. Password field on screen means a login form
-    if driver.find_elements(By.CSS_SELECTOR, "input[type='password']"):
-        reasons.append("password field present - this is a login page")
-        
-    # 3. Title gives it away
-    lowered = title.lower()
-    if any(word in lowered for word in LOGIN_WORDS):
-        reasons.append(f"title looks like a login page: {title!r}")
-        
-    # 4. Bounced to an identity provider
-    host = urlparse(current).netloc.lower()
-    for sso in SSO_HOSTS:
-        if sso in host:
-            reasons.append(f"redirected to identity provider {host}")
-            break
-        
-    # 5. The caller's own proof of arrival — strongest signal
+
+    # 2. The caller's own proof of arrival — strongest signal. 
     if success_check:
         xpath = f"//*[contains(normalize-space(.), {success_check!r})]"
-        
         try:
             WebDriverWait(driver, timeout).until(
                 EC.presence_of_element_located((By.XPATH, xpath))
@@ -52,13 +34,39 @@ def verify_arrival(driver: WebDriver, target_url: str, success_check: str = "", 
             reasons.append(
                 f"expected text {success_check!r} not found after {timeout}s"
             )
-            
+
+    # 3. Sample AFTER all waiting, never before.
+    current = driver.current_url
+    title = driver.title or ""
+
+    # 4. Redirected somewhere else?
+    if urlparse(current).path.rstrip("/") != urlparse(target_url).path.rstrip("/"):
+        reasons.append(f"redirected to {current}")
+
+    # 5. Password field on screen means a login form
+    if driver.find_elements(By.CSS_SELECTOR, "input[type='password']"):
+        reasons.append("password field present - this is a login page")
+
+    # 6. Title gives it away
+    lowered = title.lower()
+    if any(word in lowered for word in LOGIN_WORDS):
+        reasons.append(f"title looks like a login page: {title!r}")
+
+    # 7. Bounced to an identity provider
+    host = urlparse(current).netloc.lower()
+    for sso in SSO_HOSTS:
+        if sso in host:
+            reasons.append(f"redirected to identity provider {host}")
+            break
+
     return {
         "reached": not reasons,
         "final_url": current,
         "title": title,
         "reasons": reasons,
+        "settled": settle["settled"],
     }
+
 
 def _first_match(driver, selectors):
     for css in selectors:
