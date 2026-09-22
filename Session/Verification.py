@@ -4,10 +4,20 @@ from selenium.common import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.support import expected_conditions as EC
 from Session.Settle import wait_until_settled
 
 from Auth import LOGIN_WORDS, SSO_HOSTS, SSO_TEXT_HINTS, PASSWORD_GUESSES, USERNAME_GUESSES
+
+def _host(netloc: str) -> str:
+    return netloc.lower().removeprefix("www.")
+
+
+def same_page(a: str, b: str) -> bool:
+    """Same host and path. Scheme is ignored on purpose — an http -> https
+    upgrade is not a redirect away from the target."""
+    pa, pb = urlparse(a), urlparse(b)
+    return (_host(pa.netloc) == _host(pb.netloc)
+            and (pa.path.rstrip("/") or "/") == (pb.path.rstrip("/") or "/"))
 
 def verify_arrival(driver: WebDriver, target_url: str, success_check: str = "", timeout: int = 10, settle_timeout: float = 10.0) -> dict:
     """Check whether the browser actually reached the target page.
@@ -25,10 +35,11 @@ def verify_arrival(driver: WebDriver, target_url: str, success_check: str = "", 
 
     # 2. The caller's own proof of arrival — strongest signal. 
     if success_check:
-        xpath = f"//*[contains(normalize-space(.), {success_check!r})]"
         try:
             WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.XPATH, xpath))
+                lambda d: success_check in (
+                    d.execute_script("return document.body.innerText || '';") or ""
+                )
             )
         except TimeoutException:
             reasons.append(
@@ -40,12 +51,12 @@ def verify_arrival(driver: WebDriver, target_url: str, success_check: str = "", 
     title = driver.title or ""
 
     # 4. Redirected somewhere else?
-    if urlparse(current).path.rstrip("/") != urlparse(target_url).path.rstrip("/"):
+    if not same_page(current, target_url):
         reasons.append(f"redirected to {current}")
 
     # 5. Password field on screen means a login form
-    if driver.find_elements(By.CSS_SELECTOR, "input[type='password']"):
-        reasons.append("password field present - this is a login page")
+    if _first_match(driver, PASSWORD_GUESSES) and _first_match(driver, USERNAME_GUESSES):
+        reasons.append("visible username and password fields - this is a login page")
 
     # 6. Title gives it away
     lowered = title.lower()
