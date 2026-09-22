@@ -29,13 +29,22 @@ if (!window.__a11yInstalled) {
 }
 """
 
-_INSTALL_COUNTER = _COUNTER_SRC + "\nreturn true;"
+# BiDi takes a function declaration, not a script body. Passing bare statements
+# is accepted and then silently never runs, so a successful call proves nothing.
+_PRELOAD_SRC = _COUNTER_SRC + """
+window.__a11yPreloaded = true;"""
 
-_SAMPLE = """
+_PRELOAD_FN = f"""() => {{
+{_PRELOAD_SRC}
+}}"""
+
+
+_SAMPLE = _COUNTER_SRC + """
 return [
         location.href,
         document.getElementsByTagName('*').length,
-        window.__a11yInflight || 0
+        window.__a11yInflight || 0,
+        !!window.__a11yPreloaded
     ];
 """
 
@@ -53,14 +62,14 @@ def arm_settle_hooks(driver: WebDriver) -> str:
     
     try:                                   # Chromium (Chrome, Edge)
         driver.execute_cdp_cmd(
-            "Page.addScriptToEvaluateOnNewDocument", {"source": _COUNTER_SRC}
+            "Page.addScriptToEvaluateOnNewDocument", {"source": _PRELOAD_SRC}
         )
         return "cdp"
     except Exception:
         pass
 
     try:                                   # WebDriver BiDi — Firefox included
-        driver.script.add_preload_script(_COUNTER_SRC)
+        driver.script.add_preload_script(_PRELOAD_FN)
         return "bidi"
     except Exception:
         return "none"                      # falls back to per-poll installation
@@ -92,20 +101,19 @@ def wait_until_settled(driver: WebDriver, timeout: float = 10.0, stable_for: flo
         time.sleep(poll)
 
     last, since = None, None
+    preloaded = False
 
     while time.time() < deadline:
         try:
-            # Re-installed every iteration: a full document navigation replaces
-            driver.execute_script(_INSTALL_COUNTER)
             now = tuple(driver.execute_script(_SAMPLE))
         except WebDriverException:
             last, since = None, None
             time.sleep(poll)
             continue
 
-        url, nodes, inflight = now
+        url, nodes, inflight, preloaded = now
 
-        if inflight > 0:
+        if preloaded and inflight > 0:
             since = None                   # something the app started is outstanding
             last = now
             time.sleep(poll)
@@ -115,7 +123,7 @@ def wait_until_settled(driver: WebDriver, timeout: float = 10.0, stable_for: flo
             if since is None:
                 since = time.time()
             elif time.time() - since >= stable_for:
-                return {"settled": True, "final_url": url, "node_count": nodes, "inflight": inflight}
+                return {"settled": True, "final_url": url, "node_count": nodes, "inflight": inflight, "preloaded": preloaded}
         else:
             last, since = now, None
 
@@ -131,6 +139,7 @@ def wait_until_settled(driver: WebDriver, timeout: float = 10.0, stable_for: flo
         "final_url": final_url,
         "node_count": last[1] if last else -1,
         "inflight": last[2] if last else -1,
+        "preloaded": preloaded,
         "note": f"still changing after {timeout}s - the app may poll, animate or hold "
         f"an open request. final_url is a snapshot, not a settled value.",
     }

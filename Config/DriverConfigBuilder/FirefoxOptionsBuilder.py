@@ -17,6 +17,7 @@ class FirefoxOptionsBuilder(DriverOptionsBuilder):
         opts = FirefoxOptions()
         opts.set_preference("browser.shell.checkDefaultBrowser", False)
         opts.set_preference("dom.webnotifications.enabled", False)
+        opts.enable_bidi = True
         return opts
 
     def _apply(self, cfg: FirefoxConfig, opts: FirefoxOptions) -> None:
