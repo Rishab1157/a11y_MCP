@@ -39,7 +39,15 @@ def _inject(driver: WebDriver, key: str, value: str, storage_type: str) -> None:
 
         case _:
             raise ValueError(f"Unknown storage_type: {storage_type!r}")
-        
+
+def _dig(body: dict, path: str):
+    """Read a key, or a dotted path like 'data.token', from a JSON body."""
+    node = body
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
         
 class AuthProvider(ABC):
     """Applies one authentication method to a live browser session."""
@@ -71,25 +79,57 @@ class ApiAuthProvider(AuthProvider):
     mode = "api"
 
     def apply(self, driver: WebDriver, cfg: ApiAuth) -> dict:
-        response = requests.post(
-            cfg.login_endpoint, json=cfg.payload,
-            headers=cfg.headers or {}, timeout=30,
-        )
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"Login API returned HTTP {response.status_code}: {response.text[:200]}"
+        
+        with requests.Session() as http:
+            response = http.post(
+                cfg.login_endpoint, json=cfg.payload,
+                headers=cfg.headers or {}, timeout=30,
             )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Login API returned HTTP {response.status_code}: {response.text[:200]}"
+                )
+            jar = list(http.cookies)
 
-        body = response.json()
-        if cfg.token_field not in body:
+        result = {"applied": "api", "http_status": response.status_code}
+        
+        # 1. Session cookies.
+        carried = []
+        for c in jar:
+            try:
+                driver.add_cookie({
+                    "name": c.name,
+                    "value": c.value,
+                    "path": c.path or "/",
+                    "secure": bool(c.secure),
+                    **({"domain": c.domain} if c.domain else {}),
+                    **({"httpOnly": True} if c.has_nonstandard_attr("HttpOnly") else {}),
+                })
+                carried.append(c.name)
+            except Exception:
+                pass          # domain does not match the current origin — skip it
+        result["cookies_carried"] = carried
+        
+        # 2. Token from the JSON body, if there is one.
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+            
+        token = _dig(body, cfg.token_field) if isinstance(body, dict) else None
+        if token is not None:
+            _inject(driver, cfg.storage_key, token, cfg.storage_type)
+            result["storage_key"] = cfg.storage_key
+            
+        # 3. A 200 that puts nothing into the browser is not a successful login.
+        if token is None and not carried:
+            keys = sorted(body) if isinstance(body, dict) else type(body).__name__
             raise RuntimeError(
-                f"token_field {cfg.token_field!r} not in response. "
-                f"Keys present: {sorted(body)}"
+                f"Login returned HTTP {response.status_code} but nothing reached the "
+                f"browser: token_field {cfg.token_field!r} was not in the response "
+                f"and no cookies were set. Response keys: {keys}"
             )
-
-        _inject(driver, cfg.storage_key, body[cfg.token_field], cfg.storage_type)
-        return {"applied": "api", "storage_key": cfg.storage_key,
-                "http_status": response.status_code}
+        return result
         
         
 class FormAuthProvider(AuthProvider):

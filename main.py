@@ -4,7 +4,7 @@ import sys
 from fastmcp import FastMCP
 from urllib.parse import urlparse
 from Auth import AnyAuthConfig, get_provider
-from Session import SessionResult, registry, detect_auth_scheme, verify_arrival, Target, find_all, Step, _run_steps, classify_failure
+from Session import SessionResult, registry, detect_auth_scheme, verify_arrival, Target, find_all, Step, _run_steps, classify_failure, same_page
 from Config.DriverConfig import AnyBrowserConfig, CromeConfig
 from Config.DriverConfigBuilder import UnsupportedOptionError, get_builder
 from Scan import AxTreeUnsupportedError, get_reader, wait_for_page_ready
@@ -101,6 +101,7 @@ def navigate(session_id: str, url: str, success_check: str = "") -> dict:
     
     check = verify_arrival(session.driver, url, success_check)
     session.reached_target = check["reached"]
+    session.verified_url = check["final_url"] if check["reached"] else None
     
     result = {
         "ok": True,
@@ -148,7 +149,14 @@ def authenticate(session_id: str, auth: AnyAuthConfig, target_url: str, success_
                MFA or CAPTCHA
       storage  replay cookies and localStorage exported from a real session
 
-    Returns authenticated=true only after re-checking the target page.
+    Returns two separate facts:
+      authenticated   the credentials were accepted
+      reached_target  target_url itself was reached
+
+    They differ when a page needs application state: being redirected to
+    another page of the same app proves you are logged in, and reach_state
+    is the tool for establishing what the page was missing.
+
     authenticated=false means credentials were applied but access is still
     refused — read "reasons", "hint" and "auth.options" before retrying.
 
@@ -190,45 +198,60 @@ def authenticate(session_id: str, auth: AnyAuthConfig, target_url: str, success_
     driver.get(target_url)
     check = verify_arrival(driver, target_url, success_check)
     session.reached_target = check["reached"]   
-
-
+    session.verified_url = check["final_url"] if check["reached"] else None
     
+    failure_kind = None
+    if not check["reached"]:
+        failure_kind = classify_failure(driver, check["final_url"], target_url)
+    
+    authenticated = check["reached"] or failure_kind == "prerequisite"
+
     result = {
         "ok": True,
         "mode": auth.mode,
-        "authenticated": check["reached"],
+        "authenticated": authenticated,
+        "reached_target": check["reached"],     
         "final_url": check["final_url"],
         "applied": applied,
     }
     
     if not check["reached"]:
         result["reasons"] = check["reasons"]
-        result["auth"] = detect_auth_scheme(driver)
+        result["failure_kind"] = failure_kind
+        
+        if failure_kind == "prerequisite":
+            result["hint"] = (
+                "Authentication succeeded. This page was refused because it needs "
+                "application state that is not set - a selected project, workspace or "
+                "similar. Use reach_state with steps that establish it, and pick a "
+                "state-free page for target_url next time."
+            )
+        elif failure_kind in ("auth", "unknown"):
+            result["auth"] = detect_auth_scheme(driver)
 
-        if auth.mode == "none":
-            result["hint"] = (
-                "This page requires authentication but auth.mode was 'none'. "
-                "Retry with one of the modes listed in auth.recommended_modes."
-            )
-        elif auth.mode in ("token", "storage"):
-            result["hint"] = (
-                "Credentials were applied but the page still redirects. The token "
-                "may have expired, or storage_key may not match the key the app "
-                "actually reads. Check DevTools > Application > Local Storage."
-            )
-        elif auth.mode == "api":
-            result["hint"] = (
-                "The login API responded but the session is still rejected. "
-                "Check that token_field named the right key, and that storage_key "
-                "matches what the app reads."
-            )
-        elif auth.mode == "form":
-            result["hint"] = (
-                "The form was submitted but access is still denied. Credentials may "
-                "be wrong, or the site may require a second factor that form mode "
-                "cannot satisfy."
-            )
-
+            if auth.mode == "none":
+                result["hint"] = (
+                    "This page requires authentication but auth.mode was 'none'. "
+                    "Retry with one of the modes listed in auth.recommended_modes."
+                )
+            elif auth.mode in ("token", "storage"):
+                result["hint"] = (
+                    "Credentials were applied but the page still redirects. The token "
+                    "may have expired, or storage_key may not match the key the app "
+                    "actually reads. Check DevTools > Application > Local Storage."
+                )
+            elif auth.mode == "api":
+                result["hint"] = (
+                    "The login API responded but the session is still rejected. "
+                    "Check that token_field named the right key, and that storage_key "
+                    "matches what the app reads."
+                )
+            elif auth.mode == "form":
+                result["hint"] = (
+                    "The form was submitted but access is still denied. Credentials may "
+                    "be wrong, or the site may require a second factor that form mode "
+                    "cannot satisfy."
+                )
     return result
 
 
@@ -265,9 +288,24 @@ def get_accessibility_tree(session_id: str, include_all_nodes: bool = False, pag
         return {
             "ok": False,
             "code": "not_on_target",
+            "error": "The last navigation did not reach the target page. ...",
+        }
+        
+    if not session.verified_url:
+        return {
+            "ok": False,
+            "code": "not_on_target",
+            "error": "Session is marked verified but no verified URL was recorded. "
+                    "Call navigate() or reach_state() again before scanning.",
+        }
+    
+    if session.verified_url and not same_page(session.driver.current_url, session.verified_url):
+        return {
+            "ok": False,
+            "code": "not_on_target",
             "error": "The last navigation did not reach the target page. "
-                     "Scanning now would audit a login or error page. "
-                     "Call navigate() or authenticate() first.",
+                "Scanning now would audit a login or error page. "
+                "Call navigate() or authenticate() first.",
         }
         
     ready = wait_for_page_ready(session.driver, timeout=page_timeout)
@@ -390,6 +428,9 @@ def reach_state(
         return {"ok": False, "error": f"could not reach {target_url}: {e}"}
     
     check = verify_arrival(driver, target_url, success_check)
+    session.reached_target = check["reached"]
+    session.verified_url = check["final_url"] if check["reached"] else None
+    
     if not check["reached"] and steps:
         trail["steps"] = _run_steps(driver, steps, allow_destructive=allow_destructive)
         if not trail["steps"]["ok"]:

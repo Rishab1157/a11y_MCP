@@ -11,6 +11,7 @@ class Session:
     last_used: float = field(default_factory = time.time)
     created_at: float = field(default_factory = time.time)
     reached_target: bool = False
+    verified_url: str | None = None
     
     def touch(self) -> None:
         """Mark this session as recently used, so it is not reaped."""
