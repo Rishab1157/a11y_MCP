@@ -288,7 +288,9 @@ def get_accessibility_tree(session_id: str, include_all_nodes: bool = False, pag
         return {
             "ok": False,
             "code": "not_on_target",
-            "error": "The last navigation did not reach the target page. ...",
+            "error": "The last navigation did not reach the target page. "
+                    "Scanning now would audit a login or error page. "
+                    "Call navigate() or reach_state() first.",
         }
         
     if not session.verified_url:
@@ -299,14 +301,15 @@ def get_accessibility_tree(session_id: str, include_all_nodes: bool = False, pag
                     "Call navigate() or reach_state() again before scanning.",
         }
     
-    if session.verified_url and not same_page(session.driver.current_url, session.verified_url):
+    if not same_page(session.driver.current_url, session.verified_url):
         return {
             "ok": False,
-            "code": "not_on_target",
-            "error": "The last navigation did not reach the target page. "
-                "Scanning now would audit a login or error page. "
-                "Call navigate() or authenticate() first.",
+            "code": "page_changed",
+            "error": f"The page moved since it was verified: {session.verified_url} "
+                    f"-> {session.driver.current_url}. Call navigate() or "
+                    f"reach_state() again before scanning.",
         }
+
         
     ready = wait_for_page_ready(session.driver, timeout=page_timeout)
     
@@ -449,6 +452,7 @@ def reach_state(
         check = verify_arrival(driver, target_url, success_check)
 
     session.reached_target = check["reached"]
+    session.verified_url = check["final_url"] if check["reached"] else None
 
     result = {
         "ok": True,
@@ -459,10 +463,30 @@ def reach_state(
     }
     if not check["reached"]:
         result["reasons"] = check["reasons"]
-        result["auth"] = detect_auth_scheme(driver)
-        if not steps:
+        result["failure_kind"] = classify_failure(driver, check["final_url"], target_url)
+
+        if result["failure_kind"] == "auth":
+            result["auth"] = detect_auth_scheme(driver)
+            result["hint"] = (
+                "The page is behind an authentication wall. Call authenticate() "
+                "with one of the modes in auth.options before retrying."
+            )
+        elif result["failure_kind"] == "prerequisite":
+            if steps:
+                result["hint"] = (
+                    "The steps ran but this route still needs application state they "
+                    "did not establish. Re-check them with run_steps(dry_run=true)."
+                )
+            else:
+                result["hint"] = (
+                    "The app redirected to another of its own pages. Supply steps that "
+                    "establish the prerequisite state - selecting a project, workspace "
+                    "or similar."
+                )
+        elif not steps:
             result["hint"] = "The page redirected and no steps were supplied"
     return result
+
         
         
 

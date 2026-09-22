@@ -29,7 +29,7 @@ class Target(BaseModel):
         None, description="Scope the search inside this ancestor"
     )
     nth: Optional[int] = Field(
-        ge=0, description="Zero-based index into the final filtered matches"
+        None, ge=0, description="Zero-based index into the final filtered matches"
     )
     css: Optional[str] = Field(
         None, description="CSS selector used as an additional constraint or fallback locator."

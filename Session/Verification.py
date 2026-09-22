@@ -6,7 +6,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.remote.webdriver import WebDriver
 from Session.Settle import wait_until_settled
 
-from Auth import LOGIN_WORDS, SSO_HOSTS, SSO_TEXT_HINTS, PASSWORD_GUESSES, USERNAME_GUESSES
+from Auth import LOGIN_WORDS, SSO_HOSTS, SSO_TEXT_MATCHERS, PASSWORD_GUESSES, USERNAME_GUESSES
 
 def _host(netloc: str) -> str:
     return netloc.lower().removeprefix("www.")
@@ -123,7 +123,7 @@ def detect_auth_scheme(driver: WebDriver) -> dict:
             continue
         text = (el.text or "").strip()
         href = (el.get_attribute("href") or "").lower()
-        matched_text = next((h for h in SSO_TEXT_HINTS if h in text.lower()), None)
+        matched_text = next((h for h, rx in SSO_TEXT_MATCHERS if rx.search(text)), None)
         matched_host = next((h for h in SSO_HOSTS if h in href), None)
         if matched_text or matched_host:
             sso_candidates.append({
