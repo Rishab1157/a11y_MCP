@@ -4,7 +4,7 @@ import sys
 from fastmcp import FastMCP
 from urllib.parse import urlparse
 from Auth import AnyAuthConfig, get_provider
-from Session import SessionResult, registry, detect_auth_scheme, verify_arrival, Target, find_all, Step, _run_steps, classify_failure, same_page
+from Session import SessionResult, registry, detect_auth_scheme, verify_arrival, Target, find_all, Step, _run_steps, classify_failure, same_page, arm_settle_hooks
 from Config.DriverConfig import AnyBrowserConfig, CromeConfig
 from Config.DriverConfigBuilder import UnsupportedOptionError, get_builder
 from Scan import AxTreeUnsupportedError, get_reader, wait_for_page_ready
@@ -14,6 +14,7 @@ logging.basicConfig(
     stream=sys.stderr,
     format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP("a11y MCP server")
 
@@ -40,6 +41,8 @@ def create_driver(config: AnyBrowserConfig | None = None) -> dict:
         builder = get_builder(cfg.browser)
         options = builder.build(cfg)
         driver = builder.create_driver(options)
+        hooks = arm_settle_hooks(driver)
+        logger.info("settle hooks armed via %s", hooks)
     except (UnsupportedOptionError, ValueError) as e:
         return SessionResult.failure(str(e)).model_dump(exclude_none=True)
     except Exception as e:
