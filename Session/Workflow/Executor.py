@@ -9,7 +9,7 @@ import time
 
 from selenium.webdriver.remote.webdriver import WebDriver
 
-from Scan.PageReady import wait_for_page_ready
+from Settle import wait_until_settled
 from Session.Workflow.Actions import ActionError, perform
 from Session.Workflow.Expectations import (
     ExpectationFailed,
@@ -68,7 +68,7 @@ def run_steps(driver: WebDriver, steps: list[Step],  dry_run: bool = False,
 
                 # Let the DOM settle before asserting, or an expectation can
                 # match stale content from the page being left behind.
-                entry["page_ready"] = wait_for_page_ready(driver, timeout=page_timeout)
+                entry["page_ready"] = wait_until_settled(driver, timeout=page_timeout)
 
                 entry["expectations"] = verify_all(driver, step, baselines)
 

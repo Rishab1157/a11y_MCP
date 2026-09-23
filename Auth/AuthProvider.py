@@ -6,6 +6,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 
 from Auth.AuthConfig import ApiAuth, FormAuth, NoAuth, StorageAuth, TokenAuth
 from Auth.Selectors import PASSWORD_GUESSES, SUBMIT_GUESSES, USERNAME_GUESSES
+from Settle import wait_until_settled
 
 
 def _find(driver: WebDriver, selector: str | None, guesses: list[str]):
@@ -138,6 +139,8 @@ class FormAuthProvider(AuthProvider):
     def apply(self, driver: WebDriver, cfg: FormAuth) -> dict:
         if cfg.login_url:
             driver.get(cfg.login_url)
+        
+        wait_until_settled(driver)
 
         user_el = _find(driver, cfg.username_selector, USERNAME_GUESSES)
         pass_el = _find(driver, cfg.password_selector, PASSWORD_GUESSES)

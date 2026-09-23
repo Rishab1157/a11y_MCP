@@ -4,7 +4,7 @@ from selenium.common import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.remote.webdriver import WebDriver
-from Session.Settle import wait_until_settled
+from Settle import wait_until_settled
 
 from Auth import LOGIN_WORDS, SSO_HOSTS, SSO_TEXT_MATCHERS, PASSWORD_GUESSES, USERNAME_GUESSES
 

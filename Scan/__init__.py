@@ -5,7 +5,6 @@ from .AxTreeReader import (
     register,
 )
 from .ChromiumAxTreeReader import ChromiumAxTreeReader, EdgeAxTreeReader
-from .PageReady import wait_for_page_ready
 from .FirefoxAxTreeReader import FirefoxAxTreeReader
 
 __all__ = [
@@ -15,6 +14,5 @@ __all__ = [
     "EdgeAxTreeReader",
     "FirefoxAxTreeReader",
     "get_reader",
-    "register",
-    "wait_for_page_ready",
+    "register"
 ]

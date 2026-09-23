@@ -4,10 +4,12 @@ import sys
 from fastmcp import FastMCP
 from urllib.parse import urlparse
 from Auth import AnyAuthConfig, get_provider
-from Session import SessionResult, registry, detect_auth_scheme, verify_arrival, Target, find_all, Step, _run_steps, classify_failure, same_page, arm_settle_hooks
+from Session import (SessionResult, registry, detect_auth_scheme, verify_arrival,
+                     Target, find_all, Step, _run_steps, classify_failure, same_page)
+from Settle import wait_until_settled, arm_settle_hooks
 from Config.DriverConfig import AnyBrowserConfig, CromeConfig
 from Config.DriverConfigBuilder import UnsupportedOptionError, get_builder
-from Scan import AxTreeUnsupportedError, get_reader, wait_for_page_ready
+from Scan import AxTreeUnsupportedError, get_reader
 
 logging.basicConfig(
     level=logging.INFO,
@@ -304,6 +306,8 @@ def get_accessibility_tree(session_id: str, include_all_nodes: bool = False, pag
                     "Call navigate() or reach_state() again before scanning.",
         }
     
+    ready = wait_until_settled(session.driver, timeout=page_timeout)
+    
     if not same_page(session.driver.current_url, session.verified_url):
         return {
             "ok": False,
@@ -312,10 +316,6 @@ def get_accessibility_tree(session_id: str, include_all_nodes: bool = False, pag
                     f"-> {session.driver.current_url}. Call navigate() or "
                     f"reach_state() again before scanning.",
         }
-
-        
-    ready = wait_for_page_ready(session.driver, timeout=page_timeout)
-    
     try:
         tree = get_reader(session.browser).read(session.driver)
     except AxTreeUnsupportedError as e:
