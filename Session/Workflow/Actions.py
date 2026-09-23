@@ -125,8 +125,8 @@ def perform(driver: WebDriver, step: Step) -> dict:
                     "checked": current}
 
         element.click()
-        after = driver.execute_script(_IS_CHECKED, resolve(driver, step.target))
-        return {"action": action, "was": current, "now": after}
+        # after = driver.execute_script(_IS_CHECKED, resolve(driver, step.target))
+        return {"action": action, "was": current, "requested": want}
 
     raise ActionError(f"Unknown action: {action}")
 

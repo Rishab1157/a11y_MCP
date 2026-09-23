@@ -13,6 +13,7 @@ from selenium.webdriver.remote.webelement import WebElement
 
 from Scan.DomA11yLoader import inject_dom_a11y
 from Session.Workflow.Models import Target
+from Settle import wait_until_settled
 
 
 class TargetNotFoundError(LookupError):
@@ -92,12 +93,8 @@ return {
 """
 
 
-def find_all(driver: WebDriver, target: Target):
-    """Return (elements, descriptions) after within → name/role → css filtering.
-
-    nth is NOT applied here — it is the final narrowing step, done in resolve()
-    so it always indexes the fully filtered list.
-    """
+def _find_once(driver: WebDriver, target: Target):
+    """One pass. Returns (elements, descriptions) after within → name/role → css."""
     inject_dom_a11y(driver)
 
     scope = None
@@ -113,6 +110,27 @@ def find_all(driver: WebDriver, target: Target):
         raise TargetNotFoundError(f"{describe(target)}: {result['error']}")
 
     return result["elements"], result["described"]
+
+
+def find_all(driver: WebDriver, target: Target):
+    """Return (elements, descriptions) after within → name/role → css filtering.
+
+    nth is NOT applied here — it is the final narrowing step, done in resolve()
+    so it always indexes the fully filtered list.
+
+    A miss is retried once after settling. From a single pass, "this element
+    does not exist" and "this element has not rendered yet" look identical, and
+    the second is the common case in a React app: data arrives by fetch well
+    after the DOM has stopped changing. Settling only on the miss keeps the
+    normal path at full speed and pays the wait exactly where the answer would
+    otherwise have been wrong.
+    """
+    elements, described = _find_once(driver, target)
+    if elements:
+        return elements, described
+
+    wait_until_settled(driver)
+    return _find_once(driver, target)
 
 
 def resolve(driver: WebDriver, target: Target) -> WebElement:

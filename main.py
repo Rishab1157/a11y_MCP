@@ -195,6 +195,7 @@ def authenticate(session_id: str, auth: AnyAuthConfig, target_url: str, success_
         except Exception as e:
             return {"ok": False, "error": f"could not reach {landing}: {e}"}
 
+    wait_until_settled(driver)
     try:
         applied = get_provider(auth.mode).apply(driver, auth)
     except Exception as e:
@@ -444,7 +445,7 @@ def reach_state(
             return {
                 "ok": True,
                 "reached_target": False,
-                "reason": "prerequisite step falied",
+                "reason": "prerequisite step failed",
                 "final_url": driver.current_url , **trail
             }
             

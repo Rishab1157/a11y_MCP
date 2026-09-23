@@ -13,6 +13,7 @@ Strength order, strongest first:
 
 import time
 
+from selenium.common import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 
@@ -64,7 +65,7 @@ def snapshot_before(driver: WebDriver, step: Step) -> dict[int, str | None]:
             continue
         try:
             baselines[i] = resolve(driver, expect.target).text
-        except (TargetNotFoundError, AmbiguousTargetError):
+        except (TargetNotFoundError, AmbiguousTargetError, StaleElementReferenceException):
             baselines[i] = None
     return baselines
 
@@ -111,7 +112,7 @@ def _check(driver: WebDriver, expect: Expect, baseline: str | None):
     if expect.state is not None:
         try:
             element = resolve(driver, expect.target)
-        except (TargetNotFoundError, AmbiguousTargetError) as e:
+        except (TargetNotFoundError, AmbiguousTargetError, StaleElementReferenceException) as e:
             return False, f"target not resolvable: {e}"
         actual = driver.execute_script(_READ_STATE, element)
         wanted = expect.state.model_dump(exclude_none=True)
@@ -141,7 +142,7 @@ def _check(driver: WebDriver, expect: Expect, baseline: str | None):
     if expect.text_changed:
         try:
             now = resolve(driver, expect.target).text
-        except (TargetNotFoundError, AmbiguousTargetError):
+        except (TargetNotFoundError, AmbiguousTargetError, StaleElementReferenceException):
             # Present before and gone now is also a change.
             return (baseline is not None), "target no longer resolvable"
         changed = now != baseline

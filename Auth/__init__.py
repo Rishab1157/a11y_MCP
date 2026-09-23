@@ -5,7 +5,7 @@ from .Patterns import SSO_TEXT_HINTS, SSO_TEXT_MATCHERS, SSO_HOSTS, LOGIN_WORDS
 
 __all__ = [
     "USERNAME_GUESSES", "PASSWORD_GUESSES", "SUBMIT_GUESSES",
-    "SSO_TEXT_HINTS", "SSO_HOSTS", "LOGIN_WORDS", "SSO_TEXT_MATCHERS"
+    "SSO_TEXT_HINTS", "SSO_HOSTS", "LOGIN_WORDS", "SSO_TEXT_MATCHERS",
     "AnyAuthConfig", "NoAuth", "TokenAuth",
     "ApiAuth", "FormAuth", "StorageAuth",
     "AuthProvider", "get_provider",

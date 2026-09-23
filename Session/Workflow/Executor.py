@@ -8,7 +8,7 @@ instead. Without that a failed workflow is unfixable.
 import time
 
 from selenium.webdriver.remote.webdriver import WebDriver
-
+from selenium.common import StaleElementReferenceException
 from Settle import wait_until_settled
 from Session.Workflow.Actions import ActionError, perform
 from Session.Workflow.Expectations import (
@@ -37,7 +37,7 @@ class DestructiveStepBlocked(PermissionError):
     """A step targets something irreversible and allow_destructive was not set."""
 
 
-STEP_ERRORS = (TargetNotFoundError, AmbiguousTargetError, ActionError, ExpectationFailed, DestructiveStepBlocked)
+STEP_ERRORS = (TargetNotFoundError, AmbiguousTargetError, ActionError, ExpectationFailed, DestructiveStepBlocked, StaleElementReferenceException)
 
 
 def run_steps(driver: WebDriver, steps: list[Step],  dry_run: bool = False,
@@ -64,12 +64,17 @@ def run_steps(driver: WebDriver, steps: list[Step],  dry_run: bool = False,
                 entry.update(_dry_run_step(driver, step))
             else:
                 baselines = snapshot_before(driver, step)       # before acting
-                entry["result"] = perform(driver, step)
+                
+                try:
+                    entry["result"] = perform(driver, step)
+                except StaleElementReferenceException:
+                    wait_until_settled(driver, timeout=page_timeout)
+                    entry["retried"] = "stale element; re-resolved and retried once"
+                    entry["result"] = perform(driver, step)
 
                 # Let the DOM settle before asserting, or an expectation can
                 # match stale content from the page being left behind.
-                entry["page_ready"] = wait_until_settled(driver, timeout=page_timeout)
-
+                entry["settled"] = wait_until_settled(driver, timeout=page_timeout)
                 entry["expectations"] = verify_all(driver, step, baselines)
 
             entry["ok"] = True
