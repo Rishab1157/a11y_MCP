@@ -72,6 +72,11 @@ KEEP_PROPERTIES = {
     "selected", "invalid", "readonly", "level", "hidden",
 }
 
+CHILDREN_PRESENTATIONAL_ROLES = {
+    "button", "checkbox", "img", "math", "menuitemcheckbox", "menuitemradio",
+    "option", "progressbar", "radio", "scrollbar", "separator", "slider",
+    "switch", "tab",
+}
 
 # Chrome ignores nodes for different reasons and they do not mean the same
 # thing. An "uninteresting" wrapper is a plain div/span whose text is still

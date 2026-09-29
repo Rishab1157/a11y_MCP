@@ -398,7 +398,7 @@ def run_steps(
 @mcp.tool()
 def reach_state(
         session_id: str, target_url: str, steps: list[Step] | None = None,
-        success_check: str = "", allow_destructive: bool = False
+        success_check: str = "", allow_destructive: bool = False, force_steps: bool = False
     ) -> dict:
     """Get the application into a specific state, then confirm it.
 
@@ -419,6 +419,11 @@ def reach_state(
             project. Omit when the page has no prerequisites.
         success_check: Text that only appears once the real page has loaded.
             The strongest proof of arrival.
+        force_steps: Run the steps first instead of only when the target could
+            not be reached. Use it when the URL loads in the wrong state rather
+            than redirecting away: a checkout page opens fine with an empty
+            cart, so arriving there proves nothing about whether there is
+            anything to pay for. Requires steps.
     """
     
     try:
@@ -428,20 +433,25 @@ def reach_state(
 
     driver = session.driver
     trail = {}
+    
+    if force_steps and not steps:
+        return {"ok": False, "error": "force_steps was set but no steps were supplied."}
 
-    try:
-        driver.get(target_url)
-    except Exception as e:
-        return {"ok": False, "error": f"could not reach {target_url}: {e}"}
+    check = None
+    if not force_steps:
+        try:
+            driver.get(target_url)
+        except Exception as e:
+            return {"ok": False, "error": f"could not reach {target_url}: {e}"}
+        check = verify_arrival(driver, target_url, success_check)
     
-    check = verify_arrival(driver, target_url, success_check)
-    session.reached_target = check["reached"]
-    session.verified_url = check["final_url"] if check["reached"] else None
-    
-    if not check["reached"] and steps:
+    if steps and (force_steps or not check["reached"]):
+
         trail["steps"] = _run_steps(driver, steps, allow_destructive=allow_destructive)
         if not trail["steps"]["ok"]:
             session.reached_target = False
+            session.verified_url = None
+            
             return {
                 "ok": True,
                 "reached_target": False,

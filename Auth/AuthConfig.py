@@ -27,7 +27,7 @@ class ApiAuth(_AuthBase):
 
     login_endpoint: str = Field(description="Full URL of the login API.")
     payload: dict = Field(description="Body the API expects, e.g. {'email':..,'password':..}.")
-    token_field: str = Field("token", description=(
+    token_field: Optional[str] = Field("token", description=(
             "Key holding the token in the JSON response. Supports a dotted path "
             "for nested bodies, e.g. 'data.token'. Optional: pass null when the "
             "app authenticates by a session cookie rather than a stored token — "

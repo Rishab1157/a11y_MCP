@@ -117,7 +117,7 @@ class ApiAuthProvider(AuthProvider):
         except ValueError:
             body = None
             
-        token = _dig(body, cfg.token_field) if isinstance(body, dict) else None
+        token = _dig(body, cfg.token_field) if (cfg.token_field and isinstance(body, dict)) else None
         if token is not None:
             _inject(driver, cfg.storage_key, token, cfg.storage_type)
             result["storage_key"] = cfg.storage_key
@@ -125,10 +125,11 @@ class ApiAuthProvider(AuthProvider):
         # 3. A 200 that puts nothing into the browser is not a successful login.
         if token is None and not carried:
             keys = sorted(body) if isinstance(body, dict) else type(body).__name__
+            looked = (f"token_field {cfg.token_field!r} was not in the response"
+                      if cfg.token_field else "no token_field was given")
             raise RuntimeError(
                 f"Login returned HTTP {response.status_code} but nothing reached the "
-                f"browser: token_field {cfg.token_field!r} was not in the response "
-                f"and no cookies were set. Response keys: {keys}"
+                f"browser: {looked} and no cookies were set. Response keys: {keys}"
             )
         return result
         
