@@ -112,6 +112,15 @@ def _inside_presentational(node, by_id) -> bool:
         owner = by_id.get(owner.get("parentId"))
     return False
 
+import unicodedata
+
+def _is_meaningless(name: str) -> bool:
+    """A name of only icon-font glyphs is no name at all.
+    """
+    stripped = name.strip()
+    return bool(stripped) and all(
+        unicodedata.category(c) in ("Co", "Cn", "Cf") for c in stripped
+    )
 class ChromiumAxTreeReader(AxTreeReader):
     """Reads Chrome's own accessibility tree over the DevTools Protocol.
 
@@ -222,13 +231,13 @@ class ChromiumAxTreeReader(AxTreeReader):
             })
             
         interactive = [n for n in nodes if n["interactive"]]
-        unnamed_interactive = [n for n in interactive if not n["name"]]
+        unnamed_interactive = [n for n in interactive if not n["name"] or _is_meaningless(n["name"])]
         unnamed_required = [
             n for n in nodes
             if n["role"] in NAME_REQUIRED_ROLES and not n["name"]
         ]
         _locate(driver, list({id(n): n for n in unnamed_interactive + unnamed_required}.values()))
-        
+        _locate(driver, list({id(n): n for n in nodes}.values()))
         result = {
             "ax_source": self.ax_source,
             "ax_engine": self.ax_engine,
